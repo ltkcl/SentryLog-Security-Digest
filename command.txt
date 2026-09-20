@@ -1,0 +1,132 @@
+1. sudo mkdir -p /var/log/journal
+  
+2. ls -a /var/log
+3. sudo systemctl restart systemd-journald
+  
+4. journalctl --list-boots
+  
+5. chronyc tracking
+
+6. sudo systemctl restart chronyd
+
+7. sudo chronyc makestep
+
+ 8. chronyc sources -v
+  
+9. chronyc tracking
+
+10. echo "local stratum 10" | sudo tee -a /etc/chrony.conf
+  
+11. sudo systemctl restart chronyd
+
+12. sudo chronyc makestep
+
+13. chronyc tracking
+
+14. sudo bash -c 'cat << "EOF" > /usr/local/bin/sentrylog_counting.sh
+#!/bin/bash
+
+# Define log sources and event types
+AUTH_LOGS=$(journalctl -u sshd -b --no-pager 2>/dev/null | grep -iE "failed password|authentication failure")
+ERR_LOGS=$(journalctl -p err..emerg -b --no-pager 2>/dev/null)
+FAIL_LOGS=$(journalctl -b --no-pager 2>/dev/null | grep -iE "failed|failure")
+
+EVENT_TYPES=("priority_err" "service_failure" "failed_auth")
+
+echo "--- EVENT TYPE SUMMARY ---"
+for EVENT in "${EVENT_TYPES[@]}"; do
+    case "$EVENT" in
+        "priority_err")
+            if [ -z "$ERR_LOGS" ]; then
+                COUNT=0
+            else
+                COUNT=$(echo "$ERR_LOGS" | wc -l)
+            fi
+            echo "Event: Priority Errors (err+) | Count: $COUNT"
+            ;;
+        "service_failure")
+            if [ -z "$FAIL_LOGS" ]; then
+                COUNT=0
+            else
+                COUNT=$(echo "$FAIL_LOGS" | wc -l)
+            fi
+            echo "Event: Service Failures       | Count: $COUNT"
+            ;;
+        "failed_auth")
+EOF'doneecho "IP: $IP | Failures: $FAIL_COUNT | Status: $STATUS"9]{1,3}" | sort -u)
+
+15.  sudo chmod +x /usr/local/bin/ip_security_audit.sh
+16. sudo bash -c 'cat << "EOF" > /etc/systemd/system/sentrylog.service
+[Unit]
+Description=SentryLog Security Digest Service
+After=network.target chronyd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sentrylog_counting.sh
+User=root
+EOF'
+[kishore@localhost /]$ sudo bash -c 'cat << "EOF" > /etc/systemd/system/sentrylog.timer
+[Unit]
+Description=Run SentryLog Daily at 06:00
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF'
+17. sudo systemctl daemon-reload
+18. sudo systemctl enable --now sentrylog.timer
+19. systemctl status sentrylog.timer
+20.  systemctl list-timers | grep sentrylog
+21.  sudo chmod 644 /etc/cron.d/sentrylog
+22. cat << 'EOF' > ~/systemd_vs_cron.txt
+Systemd Timers vs Cron Comparison
+
+1. Service Dependencies:
+Systemd timers allow explicit ordering dependencies (After=network.target chronyd.service). Cron attempts execution strictly at the designated system time regardless of network or time sync status.
+
+2. Missed Execution Catch-Up:
+Setting 'Persistent=true' in a systemd timer ensures that if the system was powered off at 06:00, the job triggers immediately on the next boot. Cron simply skips missed runs until the next scheduled interval.
+
+3. Logging and Observability:
+Timer outputs and failure states log directly to systemd-journald (viewable via 'journalctl -u sentrylog.service'). Cron requires configured mail utilities (MTA) or stdout/stderr redirection to log files.
+EOF
+23. sudo systemd-tmpfiles --create /etc/tmpfiles.d/sentrylog.conf
+24. sudo systemd-tmpfiles --clean /etc/tmpfiles.d/sentrylog.conf
+25. sudo bash -c 'cat << "EOF" > /usr/local/bin/sentrylog.sh
+#!/bin/bash
+
+LOG_DIR="/var/log/sentrylog"
+OUT="${LOG_DIR}/security_report_$(date +%Y-%m-%d).txt"
+
+mkdir -p "$LOG_DIR"
+
+exec > "$OUT" 2>&1
+
+echo "=================================================="
+echo "SENTRYLOG SECURITY DIGEST"
+echo "Generated: $(date)"
+echo "Host: $(hostname)"
+echo "=================================================="
+echo ""
+
+echo "--- TIME SYNC ---"
+chronyc tracking | head -n 5
+echo ""
+
+echo "--- EVENT COUNTS ---"
+ERR_CNT=$(journalctl -p err..emerg -b --no-pager 2>/dev/null | wc -l)
+FAIL_CNT=$(journalctl -b --no-pager 2>/dev/null | grep -iE "failed|failure" | wc -l)
+AUTH_LOGS=$(journalctl -u sshd -b --no-pager 2>/dev/null | grep -iE "failed password|authentication failure")
+
+if [ -z "$AUTH_LOGS" ]; then
+    AUTH_CNT=0
+else
+    AUTH_CNT=$(echo "$AUTH_LOGS" | wc -l)
+sudo chmod +x /usr/local/bin/sentrylog.shtus: $status"}\.){3}[0-9]{1,3}" | sort -u)
+26. sudo cat /var/log/sentrylog/security_report_$(date +%Y-%m-%d).txt
+27. 
+  
