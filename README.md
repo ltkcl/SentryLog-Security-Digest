@@ -1,25 +1,63 @@
-# SentryLog-Security-Digest
-SentryLog Security DigestAn automated security auditing and log analysis tool for Red Hat Enterprise Linux (RHEL) systems. SentryLog parses system logs (journalctl), extracts priority errors and SSH authentication failures, calculates source IP failure frequencies, flags suspect origin addresses, and generates scheduled executive digests.Table of ContentsBusiness Case & OverviewArchitecture & MechanicsRepository Structure & PathsPrerequisitesInstallation & SetupUsage & ExecutionSystemd Timer vs CronTesting & VerificationReport Retention & CleanupBusiness Case & OverviewIT operations teams managing RHEL servers often deal with thousands of system journal entries daily. Manually reviewing logs for failed login attempts or priority service errors is inefficient and delays incident response, allowing overnight security events to go unnoticed for hours.SentryLog automates log review by executing on a daily schedule, filtering critical log events via journalctl and regular expressions, evaluating source IP failure frequencies (flagging IPs with > 5 failures as SUSPECT), writing dated report summaries, and automatically purging old reports after 30 days.Architecture & MechanicsPersistent Journaling: Logs are configured to survive system reboots under /var/log/journal.Clock Synchronization Fallback: Configures chronyd with local stratum 10 to maintain internal time references when outbound NTP (UDP 123) is blocked by network firewalls.Log Engine (sentrylog.sh):Parses system logs using journalctl.Captures priority levels err (Level 3) through emerg (Level 0).Isolates SSH authentication failures and service errors (grep -iE).Extracts unique IPv4 addresses and assigns operational status:Failures > 5: Marked as SUSPECTFailures <= 5: Marked as NORMALDual Scheduler Support: Includes systemd timer (sentrylog.timer) and cron (/etc/cron.d/sentrylog) configurations.Log Retention: Uses systemd-tmpfiles (/etc/tmpfiles.d/sentrylog.conf) to remove reports older than 30 days.Repository Structure & PathsSentryLog-Security-Digest/
+# RHEL Systems Administration Projects
+
+Automated security log auditing and storage management tools for Red Hat Enterprise Linux (RHEL) systems. This repository contains technical runbooks, shell scripts, and configuration files for two enterprise system administration utilities: **SentryLog Security Digest** and **DiskDetective Storage Audit**.
+
+---
+
+## Repository Structure
+
+```text
+.
 ├── README.md
-├── bin/
-│   └── sentrylog.sh
-├── systemd/
-│   ├── sentrylog.service
-│   └── sentrylog.timer
-├── cron/
-│   └── sentrylog
-└── tmpfiles/
-    └── sentrylog.conf
-System Installation Target Paths:/usr/local/bin/sentrylog.sh/etc/systemd/system/sentrylog.service/etc/systemd/system/sentrylog.timer/etc/cron.d/sentrylog/etc/tmpfiles.d/sentrylog.conf/var/log/sentrylog/ (Output directory)PrerequisitesOS: RHEL 8/9, CentOS Stream, or RHEL binary compatible distributions.Privileges: root or sudo access.Utilities: systemd-journald, chrony, bash, grep, coreutils.Installation & Setup1. Enable Journal Persistence & Chrony Fallback# Enable journal persistence
+├── sentrylog/
+│   ├── bin/
+│   │   └── sentrylog.sh
+│   ├── systemd/
+│   │   ├── sentrylog.service
+│   │   └── sentrylog.timer
+│   ├── cron/
+│   │   └── sentrylog
+│   └── tmpfiles/
+│       └── sentrylog.conf
+└── disk_detective/
+    ├── bin/
+    │   └── disk_detective.sh
+    └── docs/
+        └── link_investigation.md
+```
+
+---
+
+## Project 1: SentryLog Security Digest
+
+### Business Case & Problem Statement
+IT operations teams managing RHEL servers often deal with thousands of daily journal entries. Manually reviewing logs for authentication failures or critical service errors is time-consuming and delays incident response. 
+
+`SentryLog` automates log analysis by running on a daily schedule, filtering log events via `journalctl` and regular expressions, evaluating source IP failure frequencies, flagging addresses with more than 5 failures as `SUSPECT`, generating dated summary reports, and automatically purging old reports after 30 days.
+
+### Mechanics & Workflow
+1. **Persistent Journaling:** Ensures logs survive system reboots under `/var/log/journal`.
+2. **Time Sync Fallback:** Configures `chronyd` with `local stratum 10` to maintain time references when outbound NTP (UDP 123) is blocked by network firewalls.
+3. **Log Engine (`sentrylog.sh`):**
+   * Parses logs via `journalctl`.
+   * Captures priority levels `err` (3) through `emerg` (0).
+   * Isolates SSH authentication failures and service errors (`grep -iE`).
+   * Extracts unique IPv4 addresses and assigns operational status (`SUSPECT` vs `NORMAL`).
+4. **Dual Scheduling:** Supports systemd timers (`sentrylog.timer`) and cron (`/etc/cron.d/sentrylog`).
+5. **Log Retention:** Uses `systemd-tmpfiles` (`/etc/tmpfiles.d/sentrylog.conf`) to remove reports older than 30 days.
+
+### Quick Setup: SentryLog
+
+```bash
+# 1. Enable Journal Persistence & Local Time Fallback
 sudo mkdir -p /var/log/journal
 sudo systemctl restart systemd-journald
-
-# Set local stratum fallback for chrony
 echo "local stratum 10" | sudo tee -a /etc/chrony.conf
 sudo systemctl restart chronyd
 sudo chronyc makestep
-2. Deploy Script Enginesudo mkdir -p /var/log/sentrylog
 
+# 2. Deploy Script Engine
+sudo mkdir -p /var/log/sentrylog
 sudo bash -c 'cat << "EOF" > /usr/local/bin/sentrylog.sh
 #!/bin/bash
 
@@ -27,7 +65,6 @@ LOG_DIR="/var/log/sentrylog"
 OUT="${LOG_DIR}/security_report_$(date +%Y-%m-%d).txt"
 
 mkdir -p "$LOG_DIR"
-
 exec > "$OUT" 2>&1
 
 echo "=================================================="
@@ -72,9 +109,9 @@ fi
 
 chmod 640 "$OUT"
 EOF'
-
 sudo chmod +x /usr/local/bin/sentrylog.sh
-3. Deploy Systemd Timer (Primary Scheduler)# Service Unit
+
+# 3. Deploy Systemd Timer (Primary Scheduler)
 sudo bash -c 'cat << "EOF" > /etc/systemd/system/sentrylog.service
 [Unit]
 Description=SentryLog Security Digest Service
@@ -86,7 +123,6 @@ ExecStart=/usr/local/bin/sentrylog.sh
 User=root
 EOF'
 
-# Timer Unit (Daily at 06:00)
 sudo bash -c 'cat << "EOF" > /etc/systemd/system/sentrylog.timer
 [Unit]
 Description=Run SentryLog Security Digest daily at 06:00
@@ -99,58 +135,110 @@ Persistent=true
 WantedBy=timers.target
 EOF'
 
-# Enable and start timer
 sudo systemctl daemon-reload
 sudo systemctl enable --now sentrylog.timer
-4. Deploy Cron Job (Alternative Scheduler)sudo bash -c 'cat << "EOF" > /etc/cron.d/sentrylog
-0 6 * * * root /usr/local/bin/sentrylog.sh
-EOF'
 
-sudo chmod 644 /etc/cron.d/sentrylog
-5. Configure Report Retention Rulesudo bash -c 'cat << "EOF" > /etc/tmpfiles.d/sentrylog.conf
-# Type Path                 Mode User Group Age Argument
-d     /var/log/sentrylog   0750 root root  30d  -
+# 4. Configure Retention Rule (30 Days)
+sudo bash -c 'cat << "EOF" > /etc/tmpfiles.d/sentrylog.conf
+d /var/log/sentrylog 0750 root root 30d -
 EOF'
-
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/sentrylog.conf
-Usage & ExecutionManual Runsudo /usr/local/bin/sentrylog.sh
-Viewing Generated Reportssudo cat /var/log/sentrylog/security_report_$(date +%Y-%m-%d).txt
-Sample Output:==================================================
-SENTRYLOG SECURITY DIGEST
-Generated: Sun Sep 20 06:00:00 EDT 2026
-Host: rhel-server01
-==================================================
+```
 
---- TIME SYNC ---
-Reference ID    : 7F7F0101 (LOCAL)
-Stratum         : 10
-Ref time (UTC)  : Sun Sep 20 10:00:00 2026
-System time     : 0.000000000 seconds slow of NTP time
-Last offset     : +0.000000000 seconds
+---
 
---- EVENT COUNTS ---
-Priority Errors (err+): 12
-Service Failures: 4
-Failed Authentications: 9
+## Project 2: DiskDetective Storage Audit
 
---- IP ANALYSIS ---
-IP: 10.0.0.15 | Count: 2 | Status: NORMAL
-IP: 192.168.1.50 | Count: 7 | Status: SUSPECT
+### Business Case & Problem Statement
+A shared RHEL file server hosting video assets reaches critical capacity (96% utilization), preventing users from saving new renders. Unindexed project files, temporary render files, and stale data consume active space without visibility.
 
-==================================================
-Systemd Timer vs CronFeatureSystemd Timers (sentrylog.timer)Cron (/etc/cron.d/sentrylog)DependenciesSupports After=network.target chronyd.service.Executes strictly by system clock time.Missed Job Catch-upPersistent=true runs missed jobs on boot.Skips missed runs if system was offline.LoggingNative logging via journalctl -u sentrylog.service.Requires MTA or manual file redirection.Testing & VerificationSimulate authentication failure entries using logger to test threshold logic:# Inject 7 failure events for IP 192.168.1.50 (Triggers SUSPECT status)
-for i in {1..7}; do
-    logger -t sshd "Failed password for invalid user admin from 192.168.1.50 port 4521$i ssh2"
-done
+`DiskDetective` provides an automated storage auditing script that surveys filesystem utilization, scans for files over 100 MB, isolates stale files unmodified for over 180 days, calculates reclaimable space, generates executive summaries, and offloads stale data to secondary archive storage.
 
-# Inject 2 failure events for IP 10.0.0.15 (Triggers NORMAL status)
-for i in {1..2}; do
-    logger -t sshd "Failed password for root from 10.0.0.15 port 3310$i ssh2"
-done
+### Mechanics & Workflow
+1. **Survey:** Uses `lsblk`, `df -h`, and `du` to isolate mounted filesystems and directory size consumption.
+2. **Targeted Discovery (`find`):**
+   * Identifies large files (>100 MB).
+   * Identifies stale files (>180 days unmodified).
+   * Filters files by owner (`root` or unassigned users).
+3. **Links Mechanics Investigation:** Analyzes inode references, link counts, and space release behaviors for hard links vs. symbolic links.
+4. **Automated Audit Pipeline (`disk_detective.sh`):** Outputs consolidated metrics to `/var/log/storage_audit.txt`.
+5. **Cold Storage Offloading:** Mounts a virtual archive volume (`/mnt/cold_archive`) and moves stale assets out of primary storage.
 
-# Run script and verify output
-sudo /usr/local/bin/sentrylog.sh
-sudo cat /var/log/sentrylog/security_report_$(date +%Y-%m-%d).txt
-Verify systemd timer state:systemctl status sentrylog.timer
-systemctl list-timers | grep sentrylog
-Report Retention & CleanupOld reports are cleaned up according to /etc/tmpfiles.d/sentrylog.conf. To manually run or test the cleanup process:sudo systemd-tmpfiles --clean /etc/tmpfiles.d/sentrylog.conf
+### Quick Setup: DiskDetective
+
+```bash
+# 1. Deploy DiskDetective Script Engine
+sudo bash -c 'cat << "EOF" > /usr/local/bin/disk_detective.sh
+#!/bin/bash
+
+REPORT="/var/log/storage_audit.txt"
+
+{
+    echo "=================================================="
+    echo "         DISKDETECTIVE STORAGE AUDIT REPORT       "
+    echo "         Generated: $(date)                       "
+    echo "         Host: $(hostname)                        "
+    echo "=================================================="
+    echo ""
+
+    echo "--- 1. FILESYSTEM PRESSURE SURVEY ---"
+    df -h / | awk "NR==1 || NR==2"
+    echo ""
+
+    echo "--- 2. TOP 10 LARGEST FILES (>100MB) ---"
+    find / -type f -size +100M -exec du -h {} + 2>/dev/null | sort -rh | head -n 10
+    echo ""
+
+    echo "--- 3. STALE FILES UNMODIFIED IN >180 DAYS ---"
+    find / -type f -mtime +180 -exec du -h {} + 2>/dev/null | sort -rh | head -n 20
+    echo ""
+
+    echo "--- 4. RECLAIMABLE SPACE SUMMARY ---"
+    STALE_COUNT=$(find / -type f -mtime +180 2>/dev/null | wc -l)
+    STALE_SIZE=$(find / -type f -mtime +180 -exec du -ch {} + 2>/dev/null | grep total$ | awk "{print \$1}")
+    [ -z "$STALE_SIZE" ] && STALE_SIZE="0B"
+    
+    echo "Total Stale Files Identified: $STALE_COUNT"
+    echo "Total Reclaimable Disk Space: $STALE_SIZE"
+    echo ""
+
+    echo "=================================================="
+    echo "              END OF STORAGE AUDIT                "
+    echo "=================================================="
+} > "$REPORT"
+
+chmod 644 "$REPORT"
+EOF'
+
+sudo chmod +x /usr/local/bin/disk_detective.sh
+
+# 2. Execute Audit Run
+sudo /usr/local/bin/disk_detective.sh
+sudo cat /var/log/storage_audit.txt
+
+# 3. Cold Storage Setup and Offload
+sudo mkdir -p /mnt/cold_archive
+sudo dd if=/dev/zero of=/opt/cold_storage.img bs=1M count=500
+sudo mkfs.ext4 /opt/cold_storage.img
+sudo mount -o loop /opt/cold_storage.img /mnt/cold_archive
+
+sudo mkdir -p /mnt/cold_archive/stale_files_archive
+sudo find / -type f -mtime +180 -name "*.tmp" -exec cp --parents {} /mnt/cold_archive/stale_files_archive/ \; 2>/dev/null
+```
+
+---
+
+## Technical Comparison: Systemd Timers vs. Cron
+
+| Feature | Systemd Timers (`sentrylog.timer`) | Cron (`/etc/cron.d/sentrylog`) |
+| :--- | :--- | :--- |
+| **Service Dependencies** | Supports `After=network.target chronyd.service`. | Runs strictly by clock time without checking services. |
+| **Missed Job Catch-up** | `Persistent=true` executes missed runs on boot. | Skips missed runs if system was offline. |
+| **Logging & Output** | Native integration with `journalctl -u sentrylog.service`. | Requires MTA setup or explicit stdout redirection. |
+
+---
+
+## Hard Links vs. Symbolic Links Summary
+
+* **Hard Link:** Points directly to the inode address on disk. Deleting the original file decrements the link count by 1. The underlying data remains intact and disk space is **not released** until all hard links referencing that inode are deleted.
+* **Symbolic Link:** Points to the target file path. Deleting the original file leaves the soft link broken (`No such file or directory`). Disk space occupied by the source file is released immediately upon deletion (provided no hard links exist).
